@@ -1,98 +1,156 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import {
+  getUserCompletionProgress,
+  UserCompletionProgressEntity,
+} from '@retroachievements/api';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Card, Icon, List } from 'react-native-paper';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useAuth } from '@/contexts/AuthContext';
+import { useConsoleImageUrls } from '@/contexts/ConsoleImageUrlContext';
 
-export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+interface Game extends UserCompletionProgressEntity {
+  consoleIconUrl: string;
+}
+
+export default function GamesScreen() {
+  const { authorization, isAuthenticated, username } = useAuth();
+  const { consoleImageUrls } = useConsoleImageUrls();
+  const [games, setGames] = useState<Game[]>([]);
+  const [totalGames, setTotalGames] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (isAuthenticated && authorization) {
+      loadGames();
+    } else {
+      setLoading(false);
+    }
+  }, [isAuthenticated, authorization]);
+
+  const loadGames = async () => {
+    try {
+      const response = await getUserCompletionProgress(authorization, {
+        username,
+        offset: 0,
+        count: 50,
+      });
+      const g = response.results as Game[];
+
+      for (const game of g) {
+        game.consoleIconUrl = consoleImageUrls.get(game.consoleId) || '';
+      }
+      // setGames(response.results);
+      setGames(g);
+      setTotalGames(response.total);
+    } catch (error) {
+      console.error('Error loading games:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMoreGames = async () => {
+    if (games.length >= totalGames || loading) return;
+
+    try {
+      setLoading(true);
+      const response = await getUserCompletionProgress(authorization, {
+        username,
+        offset: games.length,
+        count: 50,
+      });
+      const g = response.results as Game[];
+      for (const game of g) {
+        game.consoleIconUrl = consoleImageUrls.get(game.consoleId) || '';
+      }
+      // setGames((prevGames) => [...prevGames, ...response.results]);
+      setGames((prevGames) => [...prevGames, ...g]);
+    } catch (error) {
+      console.error('Error loading more games:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderGame = ({ item }: { item: Game }) => (
+    <Card
+      style={styles.card}
+      onPress={() => router.push(`/game/${item.gameId}`)}
+    >
+      <Card.Content>
+        <List.Item
+          title={item.title}
+          description={`${item.consoleName} - ${item.numAwarded}/${item.maxPossible} achievements`}
+          left={() => <Icon source={{ uri: item.consoleIconUrl }} size={36} />}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+      </Card.Content>
+    </Card>
+  );
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
+  if (!isAuthenticated) {
+    return (
+      <ThemedView style={styles.container}>
+        <ThemedText type='title' style={styles.centerText}>
+          Please set up your credentials in Settings
         </ThemedText>
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    );
+  }
+
+  return (
+    <ThemedView style={styles.container}>
+      <ThemedText type='title' style={styles.title}>
+        Your Games
+      </ThemedText>
+
+      <FlatList
+        data={games}
+        renderItem={renderGame}
+        keyExtractor={(item) => item.gameId.toString()}
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl refreshing={loading} onRefresh={loadGames} />
+        }
+        onEndReached={loadMoreGames}
+      />
+      {loading && (
+        <View style={{ marginTop: 12 }}>
+          <ActivityIndicator size='large' />
+        </View>
+      )}
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    padding: 16,
   },
-  stepContainer: {
-    gap: 8,
+  title: {
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  list: {
+    marginLeft: 12,
+    marginRight: 12,
+    marginTop: 12,
+    paddingBottom: 16,
+  },
+  card: {
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  centerText: {
+    textAlign: 'center',
+    marginTop: 50,
+  },
+  loadingText: {
+    textAlign: 'center',
+    marginTop: 16,
   },
 });
